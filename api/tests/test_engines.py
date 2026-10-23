@@ -255,6 +255,10 @@ def test_bedrock_provider():
     with pytest.raises(AIProviderError):
         _bedrock([{"ideas": [row | {"palette": ["nope"]}] * 4}]).generate_ideas(EXAMPLE, parse_prompt(EXAMPLE), 4)
     assert get_provider("bedrock", CAT).name == "bedrock"
+    from app.engines.ai.bedrock import BedrockProvider
+
+    assert BedrockProvider(CAT, model="anthropic.claude-haiku-5-5").model == "global.anthropic.claude-haiku-5-5"
+    assert BedrockProvider(CAT, model="us.anthropic.claude-haiku-5-5").model == "us.anthropic.claude-haiku-5-5"
 
 
 def test_bedrock_credentials(monkeypatch):

@@ -113,6 +113,12 @@ class BedrockProvider:
     name: str = "bedrock"
     _client: object | None = field(default=None, init=False, repr=False)
 
+    def __post_init__(self) -> None:
+        # bedrock-runtime 不支持按需调用裸模型 ID（anthropic.xxx），需要推理配置文件 ID（global./us./eu. …）
+        if self.model.startswith("anthropic."):
+            log.warning("BEDROCK_MODEL_ID=%s 缺少推理配置文件前缀，改用 global.%s", self.model, self.model)
+            self.model = "global." + self.model
+
     @property
     def client(self):
         if self._client is None:
