@@ -1,0 +1,100 @@
+# Coolify 部署（Build Pack 选 Docker Compose，Compose 文件填 /docker-compose.coolify.yml）
+#   web     对外服务，域名由 Coolify 分配（SERVICE_FQDN_WEB_3000）
+#   api     FastAPI，仅内网访问；启动时执行 alembic upgrade head
+#   worker  RQ 后台任务（AI 方案生成、图片转换）
+#   postgres / redis  数据持久化在命名卷
+# 需要在 Coolify 中填写的变量见 README「Coolify 部署」。
+x-api-env: &api-env
+  APP_ENV: production
+  DATABASE_URL: postgresql+psycopg://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-tsumii}
+  AUTO_CREATE_TABLES: "false"
+  QUEUE_MODE: rq
+  REDIS_URL: redis://redis:6379/0
+  # local：api 与 worker 共用 storage 卷；s3：填写下面的 S3_* 变量
+  STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+  LOCAL_STORAGE_DIR: /data/storage
+  S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+  S3_BUCKET: ${S3_BUCKET:-tsumii}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+  AI_PROVIDER: ${AI_PROVIDER:-bedrock}
+  BEDROCK_MODEL_ID: ${BEDROCK_MODEL_ID:-anthropic.claude-haiku-5-5}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  # 在 AWS 上运行并绑定 IAM 角色时可留空
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+  CATALOG_SOURCE: ${CATALOG_SOURCE:-sample}
+  CORS_ORIGINS: ${SERVICE_FQDN_WEB}
+  MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-12}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${SERVICE_USER_POSTGRES}
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_POSTGRES}
+      POSTGRES_DB: ${POSTGRES_DB:-tsumii}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./api
+    environment: *api-env
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  worker:
+    build: ./api
+    command: ["python", "-m", "app.workers.worker"]
+    environment: *api-env
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      # 等 api 完成数据库迁移后再启动
+      api: { condition: service_healthy }
+
+  web:
+    build: ./web
+    environment:
+      - SERVICE_FQDN_WEB_3000
+      - BACKEND_URL=http://api:8000
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  pgdata:
+  redisdata:
+  storage:

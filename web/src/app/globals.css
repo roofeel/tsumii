@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: 'Noto Sans SC';
+  --font-serif: 'Noto Serif SC';
+  --font-display: 'Instrument Serif';
+  --font-mono: 'JetBrains Mono';
+}
+
+@layer base {
+  html,
+  body {
+    background: #faf9f6;
+    color: #222222;
+  }
+  a {
+    color: #4f6b4e;
+  }
+  a:hover {
+    color: #222222;
+  }
+  :focus-visible {
+    outline: 2px solid #222222;
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium no-underline transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-ink text-paper hover:bg-black hover:text-paper;
+  }
+  .btn-ghost {
+    @apply btn border border-warm-border bg-white text-ink hover:bg-warm;
+  }
+  .chip {
+    @apply inline-flex items-center rounded-full border border-ink/15 bg-white/70 px-3 py-1.5 text-[13px] text-ink hover:bg-white;
+  }
+  .card {
+    @apply rounded-[18px] border border-warm bg-white;
+  }
+  .eyebrow {
+    @apply text-xs uppercase tracking-[0.12em] text-muted;
+  }
+  .field {
+    @apply rounded-[10px] border border-warm-border bg-white px-3 py-2.5 text-sm text-ink;
+  }
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  body {
+    background: #fff;
+  }
+}

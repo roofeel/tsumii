@@ -1,0 +1,12 @@
+[project]
+name = "tsumii-api"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 160
+target-version = "py311"
