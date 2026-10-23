@@ -217,26 +217,22 @@ def test_mock_ideas_and_refine():
         get_provider("nope")
 
 
-class _FakeMessages:
+class _FakeBedrockRuntime:
     def __init__(self, payloads):
         self.payloads = list(payloads)
         self.calls = []
 
-    def create(self, **kwargs):
-        from types import SimpleNamespace
-
+    def converse(self, **kwargs):
         self.calls.append(kwargs)
-        text = json.dumps(self.payloads.pop(0), ensure_ascii=False)
-        return SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text=text)])
+        text = "```json\n" + json.dumps(self.payloads.pop(0), ensure_ascii=False) + "\n```"
+        return {"stopReason": "end_turn", "output": {"message": {"role": "assistant", "content": [{"text": text}]}}}
 
 
 def _bedrock(payloads):
-    from types import SimpleNamespace
-
     from app.engines.ai.bedrock import BedrockProvider
 
     p = BedrockProvider(CAT)
-    p._client = SimpleNamespace(messages=_FakeMessages(payloads))
+    p._client = _FakeBedrockRuntime(payloads)
     return p
 
 
@@ -248,8 +244,8 @@ def test_bedrock_provider():
     ideas = p.generate_ideas(EXAMPLE, parse_prompt(EXAMPLE), 4)
     assert len(ideas) == 4 and ideas[0].palette == ["s01", "s14", "s15"]
     assert ideas[1].feasibility_status == "needs-review" and ideas[0].estimated_beads > 0
-    call = p.client.messages.calls[0]
-    assert call["model"] == "anthropic.claude-haiku-5-5" and call["output_config"]["format"]["type"] == "json_schema"
+    call = p.client.calls[0]
+    assert call["modelId"] == "global.anthropic.claude-haiku-5-5" and "JSON Schema" in call["messages"][0]["content"][0]["text"]
 
     p = _bedrock([{"palette": ["s01", "s07", "s08"], "style_tags": ["樱花"], "item_type": "bracelet", "difficulty": "beginner", "description": "改为手链", "notes": ["改为手链"]}])
     ref = p.refine(ideas[0], "改成手链")
@@ -259,6 +255,24 @@ def test_bedrock_provider():
     with pytest.raises(AIProviderError):
         _bedrock([{"ideas": [row | {"palette": ["nope"]}] * 4}]).generate_ideas(EXAMPLE, parse_prompt(EXAMPLE), 4)
     assert get_provider("bedrock", CAT).name == "bedrock"
+
+
+def test_bedrock_credentials(monkeypatch):
+    from app.engines.ai.base import AIProviderError
+    from app.engines.ai.bedrock import resolve_aws_credentials
+
+    for k in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
+    assert resolve_aws_credentials(False) == {}
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAX")
+    with pytest.raises(AIProviderError):
+        resolve_aws_credentials(False)
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
+    assert resolve_aws_credentials(False) == {"aws_access_key_id": "AKIAX", "aws_secret_access_key": "secret"}
+    assert resolve_aws_credentials(True) == {}
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "ASIAX")
+    with pytest.raises(AIProviderError):
+        resolve_aws_credentials(False)
 
 
 def test_local_edit():

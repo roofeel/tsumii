@@ -1,13 +1,15 @@
-"""BedrockProvider：通过 Amazon Bedrock（Messages API）调用 Claude Haiku 5.5 生成与细化方案。
+"""BedrockProvider：通过 Amazon Bedrock Converse API（bedrock-runtime）调用 Claude Haiku 5.5 生成与细化方案。
 
+接入方式与 ai-referrer 一致：global 推理配置文件模型 ID，IAM 权限 bedrock:InvokeModel；
+生产环境（APP_ENV=production）使用 AWS 默认凭证链，其他环境优先使用环境变量中的静态凭证。
 模型只负责创意部分（名称、描述、标签、主题图案、配色）；色号限定在当前色卡内，
 数量估算、串珠序列和可行性说明沿用 MockProvider 的确定性逻辑，不由模型编造。
-凭证走 AWS 标准链：AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY 环境变量、IAM 角色等。
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass, field, replace
 
 from ..catalog import Catalog
@@ -75,20 +77,50 @@ def _refine_schema(ids: list[str]) -> dict:
     }
 
 
+def resolve_aws_credentials(production: bool) -> dict:
+    """与 ai-referrer 的 resolveBedrockCredentialConfig 相同：生产走默认凭证链，否则优先用环境变量静态凭证。"""
+    if production:
+        return {}
+    key = (os.getenv("AWS_ACCESS_KEY_ID") or "").strip()
+    secret = (os.getenv("AWS_SECRET_ACCESS_KEY") or "").strip()
+    token = (os.getenv("AWS_SESSION_TOKEN") or "").strip()
+    if bool(key) != bool(secret):
+        raise AIProviderError("使用静态 AWS 凭证时，AWS_ACCESS_KEY_ID 与 AWS_SECRET_ACCESS_KEY 必须同时设置")
+    if not key:
+        return {}
+    if key.startswith("ASIA") and not token:
+        raise AIProviderError("AWS_ACCESS_KEY_ID 为临时凭证（ASIA...）时必须设置 AWS_SESSION_TOKEN")
+    return {"aws_access_key_id": key, "aws_secret_access_key": secret, **({"aws_session_token": token} if token else {})}
+
+
+def _parse_json(text: str) -> dict:
+    # Converse 不强制输出格式：容忍 ```json 代码块或前后多余文字
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        raise AIProviderError("AI 返回格式错误")
+    try:
+        return json.loads(text[start : end + 1])
+    except json.JSONDecodeError as e:
+        raise AIProviderError("AI 返回格式错误") from e
+
+
 @dataclass
 class BedrockProvider:
     catalog: Catalog
-    model: str = "anthropic.claude-haiku-5-5"
+    model: str = "global.anthropic.claude-haiku-5-5"
     region: str = "us-east-1"
+    production: bool = False
     name: str = "bedrock"
     _client: object | None = field(default=None, init=False, repr=False)
 
     @property
     def client(self):
         if self._client is None:
-            from anthropic import AnthropicBedrockMantle  # 仅在 AI_PROVIDER=bedrock 时需要
+            import boto3
+            from botocore.config import Config
 
-            self._client = AnthropicBedrockMantle(aws_region=self.region, timeout=120.0, max_retries=2)
+            session = boto3.Session(region_name=self.region, **resolve_aws_credentials(self.production))
+            self._client = session.client("bedrock-runtime", config=Config(read_timeout=120, retries={"max_attempts": 3, "mode": "standard"}))
         return self._client
 
     @property
@@ -100,35 +132,39 @@ class BedrockProvider:
 
     def _system(self) -> list[dict]:
         colors = [{"id": c.id, "name": c.name, "nameZh": c.name_zh, "hex": c.hex, "finish": c.finish} for c in self.catalog.colors if not c.discontinued]
-        # 色卡在请求间不变，放在 system 中并标记缓存
-        return [{"type": "text", "text": SYSTEM_PROMPT + json.dumps(colors, ensure_ascii=False), "cache_control": {"type": "ephemeral"}}]
+        return [{"text": SYSTEM_PROMPT + json.dumps(colors, ensure_ascii=False)}]
 
     def _call(self, prompt: str, schema: dict) -> dict:
-        import anthropic
+        from botocore.exceptions import BotoCoreError, ClientError
 
+        user = (
+            f"{prompt}\n\n只返回一个 JSON 对象，不要 Markdown 代码块或其他文字，"
+            f"必须符合以下 JSON Schema：\n{json.dumps(schema, ensure_ascii=False)}"
+        )
         try:
-            resp = self.client.messages.create(
-                model=self.model,
-                max_tokens=16000,
+            resp = self.client.converse(
+                modelId=self.model,
                 system=self._system(),
-                messages=[{"role": "user", "content": prompt}],
-                output_config={"effort": "low", "format": {"type": "json_schema", "schema": schema}},
+                messages=[{"role": "user", "content": [{"text": user}]}],
+                inferenceConfig={"maxTokens": 16000},
             )
-        except anthropic.APIStatusError as e:
-            log.error("bedrock request failed: %s %s", e.status_code, e.message)
-            raise AIProviderError(f"AI 服务调用失败（HTTP {e.status_code}）") from e
-        except anthropic.APIConnectionError as e:
-            log.error("bedrock connection failed: %s", e)
+        except ClientError as e:
+            err = e.response.get("Error", {})
+            status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            log.error("bedrock request failed (model=%s region=%s): %s %s %s", self.model, self.region, status, err.get("Code"), err.get("Message"))
+            if status == 403:
+                raise AIProviderError("AI 服务无权限（HTTP 403）：请检查 AWS 凭证、IAM 权限（bedrock:InvokeModel）及 Bedrock 模型访问") from e
+            raise AIProviderError(f"AI 服务调用失败（HTTP {status}）") from e
+        except BotoCoreError as e:
+            log.error("bedrock request failed (model=%s region=%s): %s", self.model, self.region, e)
             raise AIProviderError("AI 服务连接失败，请稍后重试") from e
-        if resp.stop_reason == "refusal":
+        stop = resp.get("stopReason")
+        if stop in ("guardrail_intervened", "content_filtered"):
             raise AIProviderError("AI 拒绝了这个请求，请换一种描述")
-        if resp.stop_reason == "max_tokens":
+        if stop == "max_tokens":
             raise AIProviderError("AI 输出被截断，请减少方案数量后重试")
-        text = next((b.text for b in resp.content if b.type == "text"), "")
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as e:
-            raise AIProviderError("AI 返回格式错误") from e
+        blocks = resp.get("output", {}).get("message", {}).get("content", [])
+        return _parse_json("".join(b["text"] for b in blocks if "text" in b))
 
     def _clean_palette(self, palette: list[str]) -> list[str]:
         valid = [c for c in palette if c in self.catalog][:6]

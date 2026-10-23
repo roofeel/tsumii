@@ -73,5 +73,5 @@ def get_provider(name: str | None, catalog: "Catalog | None" = None) -> AIProvid
         from .bedrock import BedrockProvider
 
         s = get_settings()
-        return BedrockProvider(catalog or load_sample_catalog(), model=s.bedrock_model_id, region=s.aws_region)
+        return BedrockProvider(catalog or load_sample_catalog(), model=s.bedrock_model_id, region=s.aws_region, production=s.env == "production")
     raise ValueError(f"未知的 AI_PROVIDER：{name}。请在 app/engines/ai 中实现对应 Provider。")

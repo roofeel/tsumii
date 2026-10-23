@@ -3,7 +3,12 @@
     "allow": [
       "Bash(docker build *)",
       "Bash(docker run *)",
-      "Bash(docker rmi *)"
+      "Bash(docker rmi *)",
+      "Bash(sed -i '' 's/通过 Amazon Bedrock 调用 Claude Haiku 5.5（`BEDROCK_MODEL_ID`，默认 `anthropic.claude-haiku-5-5`）/通过 Amazon Bedrock 调用 Claude Haiku 5.5（`BEDROCK_ENDPOINT=runtime|mantle`，模型 ID 默认分别为 `global.anthropic.claude-haiku-5-5` 和 `anthropic.claude-haiku-5-5`，可用 `BEDROCK_MODEL_ID` 覆盖）/' README.md)",
+      "Bash(/private/tmp/claude-502/-Users-roofeel-Documents-feedmob-tsumii/80ba84e9-7677-42d2-8143-b74fa5f517dc/scratchpad/venv/bin/python -m pytest -q -p no:cacheprovider)",
+      "Bash(/private/tmp/claude-502/-Users-roofeel-Documents-feedmob-tsumii/80ba84e9-7677-42d2-8143-b74fa5f517dc/scratchpad/venv/bin/python -c ' *)",
+      "Bash(cd /Users/roofeel/Documents/feedmob/ai-referrer && ls -a; grep -rIl -i \"bedrock\\\\|anthropic\\\\|claude\" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=.venv . | head -30)",
+      "Read(//Users/roofeel/Documents/feedmob/ai-referrer/**)"
     ]
   }
 }

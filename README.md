@@ -31,7 +31,7 @@ web、api、worker、PostgreSQL 和 Redis 作为一个 Docker Compose 应用部�
 4. api 每次启动先执行 `alembic upgrade head`；worker 在 api 健康检查通过后才启动。
 5. 上传的图片默认存在 api 与 worker 共用的 `storage` 卷；改用 S3 时设置 `STORAGE_BACKEND=s3` 和 `S3_*` 变量。
 
-AI 使用 Amazon Bedrock 上的 Claude Haiku 5.5（`AI_PROVIDER=bedrock`）。需要在 Coolify 中设置：
+AI 使用 Amazon Bedrock 上的 Claude Haiku 5.5（`AI_PROVIDER=bedrock`），接入方式与 ai-referrer 相同：通过 `bedrock-runtime` 的 Converse API 调用 global 推理配置文件，凭证走 AWS 默认凭证链（环境变量、IAM 角色等）。需要在 Coolify 中设置：
 
 ```env
 AWS_REGION=us-east-1
@@ -39,11 +39,11 @@ AWS_ACCESS_KEY_ID=...          # 服务器绑定了 IAM 角色时可不填
 AWS_SECRET_ACCESS_KEY=...
 # 可选
 AWS_SESSION_TOKEN=             # 临时凭证（ASIA 开头）时必填
-BEDROCK_MODEL_ID=anthropic.claude-haiku-5-5
+BEDROCK_MODEL_ID=global.anthropic.claude-haiku-5-5
 CATALOG_SOURCE=sample          # 导入已核实色卡后改为 db
 ```
 
-对应的 IAM 身份需要获得 Bedrock 中 Claude Haiku 5.5 的模型访问权限，并允许 `bedrock-mantle:CreateInference`。不想调用模型时可设置 `AI_PROVIDER=mock`。
+对应的 IAM 身份需要 `bedrock:InvokeModel` 权限，并在 Bedrock 控制台开通 Claude Haiku 5.5 的模型访问。调用失败时，worker 日志中 `bedrock request failed` 一行包含 AWS 返回的错误码和原因。不想调用模型时可设置 `AI_PROVIDER=mock`。
 
 ## 当前状态
 

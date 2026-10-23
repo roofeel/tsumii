@@ -63,6 +63,6 @@ alembic/             数据库迁移
 
 **任务队列**：`QUEUE_MODE=inline` 时任务在请求内完成，返回的任务已经带有结果；`QUEUE_MODE=rq` 时任务投递到 Redis，由 `python -m app.workers.worker` 执行，客户端轮询 `/tasks/{id}` 获取结果。
 
-**AI Provider**：`AI_PROVIDER=mock`（默认）按规则生成，不需要密钥；`AI_PROVIDER=bedrock` 通过 Amazon Bedrock 调用 Claude Haiku 5.5（`BEDROCK_MODEL_ID`，默认 `anthropic.claude-haiku-5-5`）。凭证使用 AWS 标准链（`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`、`~/.aws`、IAM 角色），区域取 `AWS_REGION`。模型只负责名称、描述、标签、主题图案和配色，配色限定在当前色卡内；用量估算和可行性判断仍由确定性代码完成。
+**AI Provider**：`AI_PROVIDER=mock`（默认）按规则生成，不需要密钥；`AI_PROVIDER=bedrock` 通过 Amazon Bedrock Converse API（boto3 `bedrock-runtime`）调用 Claude Haiku 5.5（`BEDROCK_MODEL_ID`，默认 `global.anthropic.claude-haiku-5-5`），接入方式与 ai-referrer 相同。`APP_ENV=production` 时使用 AWS 默认凭证链；其他环境优先使用 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`，未设置时同样回退到默认凭证链（`~/.aws`、SSO、IAM 角色）。区域取 `AWS_REGION`。模型只负责名称、描述、标签、主题图案和配色，配色限定在当前色卡内；用量估算和可行性判断仍由确定性代码完成。
 
 **色卡**：内置示例色卡（`SAMPLE-xx`，未核实）。上线前运行 `python -m app.cli import-catalog delica-11-0.csv` 导入已核实的官方数据，并设置 `CATALOG_SOURCE=db`。

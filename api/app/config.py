@@ -38,7 +38,8 @@ class Settings:
     s3_secret_key: str | None = field(default_factory=lambda: os.getenv("S3_SECRET_KEY") or None)
     # mock：规则生成，无需密钥；bedrock：Amazon Bedrock 上的 Claude（凭证走 AWS 标准链）
     ai_provider: str = field(default_factory=lambda: os.getenv("AI_PROVIDER", "mock"))
-    bedrock_model_id: str = field(default_factory=lambda: os.getenv("BEDROCK_MODEL_ID") or "anthropic.claude-haiku-5-5")
+    # Bedrock Converse API（bedrock-runtime）的 global 推理配置文件 ID
+    bedrock_model_id: str = field(default_factory=lambda: os.getenv("BEDROCK_MODEL_ID") or "global.anthropic.claude-haiku-5-5")
     aws_region: str = field(default_factory=lambda: os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "us-east-1")
     # sample：内置示例色卡；db：数据库中已导入的核实色卡
     catalog_source: str = field(default_factory=lambda: os.getenv("CATALOG_SOURCE", "sample"))
