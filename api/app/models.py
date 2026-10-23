@@ -90,6 +90,8 @@ class Pattern(Base):
     height: Mapped[int] = mapped_column(Integer)
     cells: Mapped[list] = mapped_column(JSONType)
     components: Mapped[list] = mapped_column(JSONType, default=list)
+    # 项链主链 {"sequence": [色号 id], "lengthCm": n}；其他作品类型为空
+    strand: Mapped[dict | None] = mapped_column(JSONType, nullable=True, default=None)
     # 每次保存递增，用于乐观并发控制
     revision: Mapped[int] = mapped_column(Integer, default=1)
     # 用户“保存版本”时递增
@@ -110,6 +112,7 @@ class PatternVersion(Base):
     width: Mapped[int] = mapped_column(Integer)
     height: Mapped[int] = mapped_column(Integer)
     cells: Mapped[list] = mapped_column(JSONType)
+    strand: Mapped[dict | None] = mapped_column(JSONType, nullable=True, default=None)
     note: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 

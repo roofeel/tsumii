@@ -8,8 +8,9 @@ import { PatternThumb } from '@/components/PatternThumb';
 import { useApp, useHydrated, useT } from '@/store';
 import { ACTIVE_CATALOG, catalogById } from '@/lib/catalog';
 import { countColors } from '@/lib/pattern';
-import { ITEM_LABEL } from '@/lib/i18n';
-import type { ProjectStatus } from '@/lib/types';
+import { defaultSize, renderMotif } from '@/lib/pattern/motifs';
+import { DIFFICULTY_LABEL, ITEM_LABEL } from '@/lib/i18n';
+import type { Difficulty, ItemType, Motif, ProjectStatus } from '@/lib/types';
 
 const SERIES = [
   { name: 'Sakura', jp: '桜', desc: '樱花粉色花朵', prompt: '樱花粉色花朵耳饰，温柔春日感', colors: ['#F3C9D3', '#E59AAE', '#FFFFFF', '#F2D27A', '#B5CBA4'] },
@@ -27,11 +28,12 @@ const IDEAS = [
   { c: '#26324F', text: '东京夜景手链，深蓝渐变，加一点金色星光' },
 ];
 
-const TEMPLATES = [
-  { name: '14×14 小花胸针', prompt: '粉色小花胸针，简单可爱', meta: '初级 · 约 200 颗' },
-  { name: '平面叶片吊坠', prompt: '绿色叶片吊坠，日系极简', meta: '初级 · 约 480 颗' },
-  { name: '爱心挂饰', prompt: '红色爱心挂饰，复古', meta: '初级 · 约 480 颗' },
-  { name: '几何书签', prompt: '蓝色几何书签', meta: '中级 · 约 770 颗' },
+/** 预制模板：图纸由确定的 motif + 配色直接生成，不调用 AI。色卡 id 见 src/lib/catalog/sample-delica-11-0.json */
+const TEMPLATES: { name: string; description: string; itemType: ItemType; motif: Motif; palette: string[]; difficulty: Difficulty }[] = [
+  { name: '14×14 小花胸针', description: '樱粉花瓣配蜜黄花心的平面小花，简单可爱。', itemType: 'brooch', motif: 'flower', palette: ['s01', 's07', 's08', 's11', 's12'], difficulty: 'beginner' },
+  { name: '平面叶片吊坠', description: '抹茶绿叶片配象牙白底，日系极简。', itemType: 'pendant', motif: 'leaf', palette: ['s01', 's14', 's15', 's16', 's12'], difficulty: 'beginner' },
+  { name: '爱心挂饰', description: '朱红爱心与复古金色收边。', itemType: 'pendant', motif: 'heart', palette: ['s01', 's10', 's09', 's06', 's12'], difficulty: 'beginner' },
+  { name: '几何书签', description: '蓝色系斜纹几何，干净利落。', itemType: 'bookmark', motif: 'geometric', palette: ['s02', 's19', 's20', 's21', 's10'], difficulty: 'intermediate' },
 ];
 
 const STATUS_STYLE: Record<ProjectStatus, { label: string; cls: string }> = {
@@ -55,7 +57,7 @@ export default function HomePage() {
   const router = useRouter();
   const hydrated = useHydrated();
   const { t, lang } = useT();
-  const { projects, order, seedDemo, setSession } = useApp();
+  const { projects, order, seedDemo, setSession, createProject } = useApp();
   const [prompt, setPrompt] = useState('');
   const catalog = useMemo(() => catalogById(ACTIVE_CATALOG), []);
 
@@ -69,6 +71,20 @@ export default function HomePage() {
   const goCreate = (text: string) => {
     setSession({ prompt: text, ideas: [], pickedId: null, variants: [] });
     router.push(`/create?auto=1`);
+  };
+
+  const openTemplate = (tpl: (typeof TEMPLATES)[number]) => {
+    const size = defaultSize(tpl.itemType);
+    const id = createProject({
+      name: tpl.name,
+      description: tpl.description,
+      creationMode: 'ai',
+      itemType: tpl.itemType,
+      width: size.width,
+      height: size.height,
+      cells: renderMotif(tpl.motif, tpl.palette, size),
+    });
+    router.push(`/editor/${id}`);
   };
 
   const onFile = (f: File | undefined) => {
@@ -225,17 +241,22 @@ export default function HomePage() {
           <div className="flex flex-col gap-3.5">
             <h2 className="text-[17px] font-bold">{t('home.templates')}</h2>
             <div className="card flex flex-col">
-              {TEMPLATES.map((tpl) => (
-                <button
-                  key={tpl.name}
-                  type="button"
-                  onClick={() => goCreate(tpl.prompt)}
-                  className="flex items-center justify-between gap-3 border-b border-warm-line px-4 py-3.5 text-left last:border-0 hover:bg-paper"
-                >
-                  <span className="text-sm">{tpl.name}</span>
-                  <span className="text-xs text-muted">{tpl.meta}</span>
-                </button>
-              ))}
+              {TEMPLATES.map((tpl) => {
+                const { width, height } = defaultSize(tpl.itemType);
+                return (
+                  <button
+                    key={tpl.name}
+                    type="button"
+                    onClick={() => openTemplate(tpl)}
+                    className="flex items-center justify-between gap-3 border-b border-warm-line px-4 py-3.5 text-left last:border-0 hover:bg-paper"
+                  >
+                    <span className="text-sm">{tpl.name}</span>
+                    <span className="text-xs text-muted">
+                      {DIFFICULTY_LABEL[lang][tpl.difficulty]} · 约 {Math.round((width * height) / 10) * 10} 颗
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
           <div className="flex flex-col gap-3.5">

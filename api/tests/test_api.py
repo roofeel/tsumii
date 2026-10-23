@@ -109,3 +109,38 @@ def test_isolation_between_users(client):
     assert client.get(f"/api/v1/projects/{p['id']}", headers={"X-User-Id": "bob"}).status_code == 404
     assert client.post("/api/v1/projects", json={"name": "x", "itemType": "brooch", "creationMode": "image", "width": 2, "height": 2, "cells": ["s01"]}, headers=H).status_code == 422
     assert client.delete(f"/api/v1/projects/{p['id']}", headers=H).status_code == 204
+
+
+def test_necklace_strand_flow(client):
+    task = client.post("/api/v1/ai/ideas", json={"prompt": EXAMPLE, "count": 4}, headers=H).json()
+    idea = task["result"]["ideas"][0]
+    assert idea["itemType"] == "necklace" and all(not c.startswith("#") for c in idea["strandSequence"])
+
+    p = client.post("/api/v1/projects/from-idea", json={"ideaId": idea["id"]}, headers=H).json()
+    pat, pid = p["pattern"], p["id"]
+    assert pat["strand"] == {"sequence": idea["strandSequence"], "lengthCm": 40}
+    assert (pat["width"], pat["height"]) == (20, 24) and pat["validationErrors"] == []
+
+    # 材料 = 吊坠方格 + 串链 308 颗；配件含串链用线
+    m = client.get(f"/api/v1/projects/{pid}/materials", headers=H).json()
+    assert m["totalBeads"] == 20 * 24 + 308
+    assert any(a["id"] == "strand-thread" for a in m["accessories"])
+
+    # PUT 不传 strand 时保留，改长度后用量随之变化
+    put = {"width": pat["width"], "height": pat["height"], "cells": pat["cells"]}
+    assert client.put(f"/api/v1/projects/{pid}/pattern", json=put, headers=H).json()["strand"]["lengthCm"] == 40
+    r = client.put(f"/api/v1/projects/{pid}/pattern", json=put | {"strand": {"sequence": ["s01", "s14"], "lengthCm": 13}}, headers=H)
+    assert r.json()["strand"] == {"sequence": ["s01", "s14"], "lengthCm": 13}
+    assert client.get(f"/api/v1/projects/{pid}/materials", headers=H).json()["totalBeads"] == 20 * 24 + 100
+    bad = client.put(f"/api/v1/projects/{pid}/pattern", json=put | {"strand": {"sequence": ["nope"], "lengthCm": 40}}, headers=H)
+    assert bad.status_code == 422
+
+    # 版本快照包含串链；删除串链后恢复版本可找回
+    assert client.post(f"/api/v1/projects/{pid}/versions", json={"note": "v2"}, headers=H).json()["strand"]["lengthCm"] == 13
+    assert client.put(f"/api/v1/projects/{pid}/pattern", json=put | {"strand": None}, headers=H).json()["strand"] is None
+    assert client.post(f"/api/v1/projects/{pid}/versions/2/restore", headers=H).json()["strand"]["lengthCm"] == 13
+
+    pdf = client.get(f"/api/v1/projects/{pid}/export/pdf", headers=H)
+    assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
+    csv = client.get(f"/api/v1/projects/{pid}/export/csv", headers=H).content.decode("utf-8-sig")
+    assert "串链用线" in csv

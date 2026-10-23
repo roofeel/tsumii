@@ -86,6 +86,8 @@ services:
     environment:
       - SERVICE_FQDN_WEB_3000
       - BACKEND_URL=http://api:8000
+      # 调用 AI 需要的邀请码，逗号分隔；留空则不限制
+      - INVITE_CODES=${INVITE_CODES:-}
     depends_on:
       api: { condition: service_healthy }
     healthcheck:

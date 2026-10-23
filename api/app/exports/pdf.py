@@ -23,6 +23,7 @@ from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, Simple
 from ..engines.catalog import Catalog
 from ..engines.materials import calculate_materials, estimate_accessories
 from ..engines.pattern import product_size_cm, row_runs, validate_pattern
+from ..engines.strand import strand_repeats, validate_strand
 from .common import DIFFICULTY_ZH, ITEM_ZH, STATUS_ZH, SheetSource, legend_order
 from .image import pattern_png
 
@@ -90,10 +91,11 @@ def pattern_pdf(src: SheetSource, catalog: Catalog) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=14 * mm, rightMargin=14 * mm, topMargin=14 * mm, bottomMargin=14 * mm, title=f"{src.name} 制作图纸", author="Tsumii")
     avail_w = A4[0] - 28 * mm
-    summary = calculate_materials(src.cells, catalog, src.wastage_rate)
-    accessories = estimate_accessories(src.item_type, src.width, src.height, 42 if src.item_type == "necklace" else None)
-    errors = validate_pattern(src.cells, src.width, src.height, catalog)
-    order = legend_order(src.cells, catalog)
+    summary = calculate_materials(src.all_beads, catalog, src.wastage_rate)
+    wear = src.wear_length_cm or (42 if src.item_type == "necklace" and not src.strand else None)
+    accessories = estimate_accessories(src.item_type, src.width, src.height, wear, src.strand)
+    errors = validate_pattern(src.cells, src.width, src.height, catalog) + validate_strand(src.strand, catalog)
+    order = legend_order(src.cells + (src.strand["sequence"] if src.strand else []), catalog)
     code_index = {cid: i + 1 for i, cid in enumerate(order)}
     w_cm, h_cm = product_size_cm(src.width, src.height)
     lines_by_id = {l.color_id: l for l in summary.lines}
@@ -128,7 +130,8 @@ def pattern_pdf(src: SheetSource, catalog: Catalog) -> bytes:
         ["主题", " · ".join(src.style_tags) or "—"],
         ["珠子类型", "MIYUKI Delica 11/0"],
         ["排列方式", "平面方格（Square stitch / Loom）"],
-        ["图纸尺寸", f"{src.width} 列 × {src.height} 行"],
+        ["吊坠图纸" if src.strand else "图纸尺寸", f"{src.width} 列 × {src.height} 行"],
+        *([["串链", f"{src.strand['lengthCm']:g} cm · 约 {strand_repeats(src.strand)[0]} 颗"]] if src.strand else []),
         ["成品尺寸", f"约 {w_cm} × {h_cm} cm（不含配件）"],
         ["珠子总数", f"{summary.total_beads} 颗 · {summary.color_count} 色"],
         ["难度", DIFFICULTY_ZH.get(src.difficulty or "", "—")],
@@ -151,13 +154,31 @@ def pattern_pdf(src: SheetSource, catalog: Catalog) -> bytes:
     acc = [["配件", "数量", "说明", "状态"]] + [[a.name, a.quantity, Paragraph(a.reason, S["small"]), STATUS_ZH[a.status]] for a in accessories]
     story += [KeepTogether([Paragraph("配件", S["h2"]), _table(acc, [34 * mm, 24 * mm, avail_w - 78 * mm, 20 * mm])])]
 
+    # 串链串法
+    if src.strand:
+        total, repeats, remainder = strand_repeats(src.strand)
+        tail = f"，最后再串单元的前 {remainder} 颗" if remainder else ""
+        unit = "  ".join(f"{i + 1}:{code_index[c]}" for i, c in enumerate(src.strand["sequence"]))
+        story += [
+            KeepTogether([
+                Paragraph("串链串法", S["h2"]),
+                Paragraph(
+                    f"单股穿线，按下面的循环单元从一端串起：重复 {repeats} 次{tail}，共约 {total} 颗"
+                    f"（{src.strand['lengthCm']:g} cm，不含吊坠与扣件）。串完后两端接连接环与龙虾扣，吊坠挂在串链正中。",
+                    S["body"],
+                ),
+                Paragraph(f"循环单元（位置:图例编号）：{unit}", S["body"]),
+            ])
+        ]
+
     # 网格图（新页）
     grid_png = pattern_png(src.cells, src.width, src.height, catalog, code_index)
     grid = Image(io.BytesIO(grid_png))
     max_h = A4[1] - 28 * mm - 24 * mm
     scale = min(avail_w / grid.imageWidth, max_h / grid.imageHeight)
     grid.drawWidth, grid.drawHeight = grid.imageWidth * scale, grid.imageHeight * scale
-    story += [PageBreak(), Paragraph("串珠网格图 · 行列坐标（格内数字为图例编号）", S["h2"]), grid]
+    grid_title = "吊坠网格图" if src.strand else "串珠网格图"
+    story += [PageBreak(), Paragraph(f"{grid_title} · 行列坐标（格内数字为图例编号）", S["h2"]), grid]
 
     # 制作步骤
     steps = [

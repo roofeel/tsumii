@@ -52,6 +52,14 @@ export interface PatternComponent {
   height: number;
 }
 
+/** 项链主链：单股珠串，按循环单元重复串到指定长度 */
+export interface Strand {
+  /** 一个循环单元的色序，值为 BeadColor.id */
+  sequence: string[];
+  /** 串链长度（cm，不含吊坠与扣件），颗数由此估算 */
+  lengthCm: number;
+}
+
 /** Pattern：最终可制作的结构化图纸（不是图片） */
 export interface Pattern {
   id: string;
@@ -64,6 +72,8 @@ export interface Pattern {
   /** 行优先，长度 = width * height，值为 BeadColor.id */
   cells: string[];
   components: PatternComponent[];
+  /** 项链主链；其他作品类型没有 */
+  strand?: Strand;
   version: number;
 }
 
@@ -72,6 +82,7 @@ export interface PatternVersion {
   cells: string[];
   width: number;
   height: number;
+  strand?: Strand;
   note: string;
   createdAt: string;
 }
@@ -102,7 +113,7 @@ export interface DesignIdea {
   description: string;
   /** 色卡 id，第一个通常为底色 */
   palette: string[];
-  /** 项链/手链主链的珠子颜色循环（hex） */
+  /** 项链主链的珠子颜色循环（色卡 id；旧数据可能为 hex） */
   strandSequence: string[];
   motif: Motif;
   /** 估算值，不可作为采购依据 */

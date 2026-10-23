@@ -31,7 +31,7 @@ def list_projects(db: Session = Depends(get_db), user: str = Depends(current_use
 
 @router.post("", response_model=ProjectOut, status_code=201)
 def create(req: ProjectCreate, db: Session = Depends(get_db), user: str = Depends(current_user_id)):
-    p = svc.create_project(db, user, **req.model_dump())
+    p = svc.create_project(db, user, **req.model_dump(exclude={"strand"}), strand=req.strand.to_db() if req.strand else None)
     db.commit()
     return svc.project_out(p)
 
@@ -76,7 +76,8 @@ def get_pattern(project_id: str, db: Session = Depends(get_db), user: str = Depe
 def put_pattern(project_id: str, req: PatternPut, db: Session = Depends(get_db), user: str = Depends(current_user_id)):
     """保存编辑后的图纸。提供 baseRevision 可防止覆盖其他设备的修改。"""
     p = svc.get_project(db, user, project_id)
-    pat = svc.update_pattern(p, req.width, req.height, req.cells, req.base_revision)
+    kw = {"strand": req.strand.to_db() if req.strand else None} if "strand" in req.model_fields_set else {}
+    pat = svc.update_pattern(p, req.width, req.height, req.cells, req.base_revision, **kw)
     db.commit()
     return svc.pattern_out(pat)
 
@@ -144,7 +145,7 @@ def patch_shopping(project_id: str, req: ShoppingPatch, db: Session = Depends(ge
 def merge(req: MergeRequest, db: Session = Depends(get_db), user: str = Depends(current_user_id)):
     """合并多个项目的采购需求：先累加用量，再统一计算损耗与包装"""
     projects = [svc.get_project(db, user, pid) for pid in dict.fromkeys(req.project_ids)]
-    s = merge_shopping_lists([p.pattern.cells for p in projects], get_catalog(), req.wastage_rate)
+    s = merge_shopping_lists([svc.all_beads(p.pattern) for p in projects], get_catalog(), req.wastage_rate)
     return {"projectIds": [p.id for p in projects], **camelize(s.to_dict()), "lines": [camelize(l) for l in s.to_dict()["lines"]]}
 
 

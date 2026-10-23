@@ -1,4 +1,4 @@
-import type { BeadColor, Pattern, PatternVersion } from '../types';
+import type { BeadColor, Pattern, PatternVersion, Strand } from '../types';
 import { DELICA_11_0_SIZE_MM } from '../catalog';
 
 export function uid(prefix = 'id'): string {
@@ -11,6 +11,7 @@ export function createPattern(input: {
   height: number;
   cells: string[];
   variantId?: string;
+  strand?: Strand;
 }): Pattern {
   if (input.cells.length !== input.width * input.height) {
     throw new Error(`cells length ${input.cells.length} ≠ ${input.width}×${input.height}`);
@@ -25,12 +26,21 @@ export function createPattern(input: {
     height: input.height,
     cells: input.cells.slice(),
     components: [{ id: 'main', name: 'main', x: 0, y: 0, width: input.width, height: input.height }],
+    ...(input.strand ? { strand: { sequence: input.strand.sequence.slice(), lengthCm: input.strand.lengthCm } } : {}),
     version: 1,
   };
 }
 
 export function snapshot(p: Pattern, note: string): PatternVersion {
-  return { version: p.version, cells: p.cells.slice(), width: p.width, height: p.height, note, createdAt: new Date().toISOString() };
+  return {
+    version: p.version,
+    cells: p.cells.slice(),
+    width: p.width,
+    height: p.height,
+    ...(p.strand ? { strand: { sequence: p.strand.sequence.slice(), lengthCm: p.strand.lengthCm } } : {}),
+    note,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 export function setCell(cells: string[], index: number, colorId: string): string[] {
@@ -156,7 +166,11 @@ export function validatePattern(p: Pattern, catalog: Map<string, BeadColor>): st
   p.cells.forEach((c) => {
     if (!catalog.has(c)) unknown.add(c);
   });
+  p.strand?.sequence.forEach((c) => {
+    if (!catalog.has(c)) unknown.add(c);
+  });
   if (unknown.size) errors.push(`存在不在色卡中的色号：${[...unknown].join(', ')}`);
+  if (p.strand && !p.strand.sequence.length) errors.push('串链循环单元为空');
   return errors;
 }
 

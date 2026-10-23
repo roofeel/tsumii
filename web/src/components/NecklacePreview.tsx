@@ -1,22 +1,35 @@
-import type { BeadColor, DesignIdea } from '@/lib/types';
+import type { BeadColor, DesignIdea, Strand } from '@/lib/types';
 import { renderMotif } from '@/lib/pattern/motifs';
 
 /**
  * AI 效果图占位：在接入图像生成模型前，用方案的配色与 motif 画出项链示意。
  * 接入后，若 idea.previewImage 存在则直接显示生成图。
  */
-export function NecklacePreview({ idea, catalog, height = 260 }: { idea: DesignIdea; catalog: Map<string, BeadColor>; height?: number }) {
+export function NecklacePreview({
+  idea,
+  catalog,
+  height = 260,
+  strand,
+}: {
+  idea: DesignIdea;
+  catalog: Map<string, BeadColor>;
+  height?: number;
+  /** 项目中实际的串链；不传时使用方案的串链色序 */
+  strand?: Strand;
+}) {
   if (idea.previewImage) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={idea.previewImage} alt={idea.name} className="h-full w-full object-cover" style={{ height }} />;
   }
+  // 色序值为色卡 id；兼容旧方案中直接存的 hex
+  const sequence = (strand?.sequence ?? idea.strandSequence).map((v) => (v.startsWith('#') ? v : catalog.get(v)?.hex ?? '#ccc'));
   const n = idea.itemType === 'bracelet' ? 44 : 38;
   const beads = Array.from({ length: n }, (_, i) => {
     const isLoop = idea.itemType === 'bracelet';
     const t = isLoop ? (2 * Math.PI * i) / n : Math.PI * (0.05 + (0.9 * i) / (n - 1));
     const x = isLoop ? 50 + 30 * Math.cos(t) : 50 + 38 * Math.cos(t);
     const y = isLoop ? 46 + 30 * Math.sin(t) : 6 + 62 * Math.sin(t);
-    return { x, y, c: idea.strandSequence[i % idea.strandSequence.length] };
+    return { x, y, c: sequence[i % sequence.length] ?? '#ccc' };
   });
   const pend = renderMotif(idea.motif, idea.palette, { width: 9, height: 11 });
   const hex = (id: string) => catalog.get(id)?.hex ?? '#ccc';

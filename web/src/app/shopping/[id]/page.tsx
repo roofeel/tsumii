@@ -30,7 +30,7 @@ export default function ShoppingPage() {
   }, [project, projects, mergeIds, catalog, wastageRate]);
 
   const accessories = useMemo(
-    () => (project ? estimateAccessories(project.itemType, project.pattern, { wearLengthCm: project.itemType === 'necklace' ? 42 : undefined }) : []),
+    () => (project ? estimateAccessories(project.itemType, project.pattern, { wearLengthCm: project.itemType === 'necklace' && !project.pattern.strand ? 42 : undefined }) : []),
     [project],
   );
 

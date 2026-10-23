@@ -1,7 +1,7 @@
 // Tsumii API 客户端（对应 api/ 中的 FastAPI 服务，前缀 /api/v1）。
 // 前端目前以 localStorage 作为 MVP 存储；迁移到服务器存储时，store 中的各个 action 改为调用这里的函数即可。
 
-import type { DesignIdea, DesignVariant, ItemType, ParsedBrief } from '../types';
+import type { DesignIdea, DesignVariant, ItemType, ParsedBrief, Strand } from '../types';
 
 export interface Task<R = unknown> {
   id: string;
@@ -20,6 +20,8 @@ export interface ServerPattern {
   width: number;
   height: number;
   cells: string[];
+  /** 项链主链 */
+  strand?: Strand | null;
   version: number;
   revision: number;
   validationErrors: string[];
@@ -104,12 +106,13 @@ export function createClient({ baseUrl, userId, fetchImpl = fetch }: ClientOptio
     },
     listProjects: () => req<unknown[]>('GET', '/projects'),
     getProject: (id: string) => req<ServerProject>('GET', `/projects/${id}`),
-    createProject: (p: { name: string; itemType: ItemType; creationMode: 'image' | 'ai'; width: number; height: number; cells: string[]; description?: string }) =>
+    createProject: (p: { name: string; itemType: ItemType; creationMode: 'image' | 'ai'; width: number; height: number; cells: string[]; strand?: Strand; description?: string }) =>
       req<ServerProject>('POST', '/projects', p),
     createFromIdea: (ideaId: string, variantId?: string, name?: string) => req<ServerProject>('POST', '/projects/from-idea', { ideaId, variantId, name }),
     deleteProject: (id: string) => req<void>('DELETE', `/projects/${id}`),
-    savePattern: (id: string, width: number, height: number, cells: string[], baseRevision?: number) =>
-      req<ServerPattern>('PUT', `/projects/${id}/pattern`, { width, height, cells, baseRevision }),
+    // strand 不传时后端保留原串链，传 null 删除串链
+    savePattern: (id: string, width: number, height: number, cells: string[], baseRevision?: number, strand?: Strand | null) =>
+      req<ServerPattern>('PUT', `/projects/${id}/pattern`, { width, height, cells, baseRevision, strand }),
     localEdit: (id: string, rect: { x: number; y: number; w: number; h: number }, instruction: string) =>
       req<{ summary: string; pattern: ServerPattern }>('POST', `/projects/${id}/pattern/local-edit`, { rect, instruction }),
     saveVersion: (id: string, note: string) => req<unknown>('POST', `/projects/${id}/versions`, { note }),

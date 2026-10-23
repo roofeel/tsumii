@@ -5,6 +5,7 @@ import type { DesignIdea, DesignVariant, Difficulty, ItemType, Motif } from '../
 import type { AIProvider, GenerateRequest } from './index';
 import { ACTIVE_CATALOG, catalogById, colorLab, nearestColor } from '../catalog';
 import { defaultSize } from '../pattern/motifs';
+import { DEFAULT_STRAND_LENGTH_CM, hasStrand, strandBeadCount } from '../pattern/strand';
 
 interface Direction {
   name: string;
@@ -56,19 +57,20 @@ const FAMILY_OF: Record<string, keyof typeof DIRECTIONS> = {
 };
 
 const byId = catalogById(ACTIVE_CATALOG);
-const hexOf = (id: string) => byId.get(id)?.hex ?? '#CCCCCC';
 
-function strandFor(palette: string[], motif: Motif): string[] {
-  const [bg, c1, c2, c3] = palette;
-  if (motif === 'gradient') return [c1, c1, c2, c2, c3, c3, c2, c2].map(hexOf);
-  if (motif === 'night') return [c1, c1, c2, palette[4] ?? c2].map(hexOf);
-  return [bg, bg, c1, bg, bg, c2].map(hexOf);
+/** 项链主链的色序循环单元（色卡 id）；不足 4 色时复用最后一个 */
+export function strandFor(palette: string[], motif: Motif): string[] {
+  const p = (i: number) => palette[Math.min(i, palette.length - 1)];
+  const [bg, c1, c2, c3] = [p(0), p(1), p(2), p(3)];
+  if (motif === 'gradient') return [c1, c1, c2, c2, c3, c3, c2, c2];
+  if (motif === 'night') return [c1, c1, c2, palette[4] ?? c2];
+  return [bg, bg, c1, bg, bg, c2];
 }
 
 function estimate(itemType: ItemType, palette: string[]) {
   const size = defaultSize(itemType);
   const motifBeads = size.width * size.height;
-  const strand = itemType === 'necklace' ? 260 : itemType === 'bracelet' ? 0 : 0;
+  const strand = hasStrand(itemType) ? strandBeadCount(DEFAULT_STRAND_LENGTH_CM) : 0;
   // 估算值取整到 10
   return { colors: new Set(palette).size, beads: Math.round((motifBeads + strand) / 10) * 10 };
 }

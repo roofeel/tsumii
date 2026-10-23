@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from ..catalog import Catalog, load_sample_catalog
 from ..color import Lab
 from ..motifs import default_size
+from ..strand import DEFAULT_STRAND_LENGTH_CM, has_strand, strand_bead_count
 from .base import DesignIdea, Refinement
 from .parse import ParsedBrief
 
@@ -65,10 +66,9 @@ class MockProvider:
     catalog: Catalog = field(default_factory=load_sample_catalog)
     name: str = "mock"
 
-    def _hex(self, cid: str) -> str:
-        return self.catalog.get(cid).hex if cid in self.catalog else "#CCCCCC"
-
-    def _strand(self, palette: list[str], motif: str) -> list[str]:
+    @staticmethod
+    def _strand(palette: list[str], motif: str) -> list[str]:
+        """项链主链的色序循环单元（色卡 id）"""
         bg, c1, c2, c3 = (palette + [palette[-1]] * 4)[:4]
         if motif == "gradient":
             seq = [c1, c1, c2, c2, c3, c3, c2, c2]
@@ -76,12 +76,12 @@ class MockProvider:
             seq = [c1, c1, c2, palette[4] if len(palette) > 4 else c2]
         else:
             seq = [bg, bg, c1, bg, bg, c2]
-        return [self._hex(c) for c in seq]
+        return seq
 
     @staticmethod
     def _estimate(item_type: str, palette: list[str]) -> tuple[int, int]:
         w, h = default_size(item_type)
-        strand = 260 if item_type == "necklace" else 0
+        strand = strand_bead_count(DEFAULT_STRAND_LENGTH_CM) if has_strand(item_type) else 0
         return len(set(palette)), round((w * h + strand) / 10) * 10
 
     def build_idea(self, d: Direction, prompt: str, item_type: str, difficulty: str, style: str) -> DesignIdea:

@@ -300,3 +300,27 @@ def test_motifs_match_frontend_fixtures():
     for key, case in data["cases"].items():
         motif = key.split(":")[0]
         assert render_motif(motif, data["palette"], case["width"], case["height"]) == case["cells"], key
+
+
+def test_strand_engine_matches_frontend():
+    from app.engines.strand import expand_strand, strand_bead_count, strand_for_item, strand_repeats, strand_sequence_ids, validate_strand
+
+    # 与 web/src/lib/__tests__/strand.test.ts 相同的用例
+    assert strand_bead_count(40) == 308 and strand_bead_count(13) == 100
+    s = {"sequence": ["s01", "s01", "s14"], "lengthCm": 13}
+    assert len(expand_strand(s)) == 100 and expand_strand(s)[:4] == ["s01", "s01", "s14", "s01"]
+    assert strand_repeats(s) == (100, 33, 1)
+    assert strand_for_item("bracelet", ["s01"], CAT) is None
+    assert strand_for_item("necklace", ["s01", "s14"], CAT) == {"sequence": ["s01", "s14"], "lengthCm": 40}
+    assert strand_sequence_ids([CAT.get("s01").hex, "s14", "nope"], CAT) == ["s01", "s14"]
+    assert validate_strand(s, CAT) == [] and validate_strand({"sequence": [], "lengthCm": 5}, CAT)
+
+    c = calculate_materials(["s14", "s14"] + expand_strand(s), CAT, 0)
+    assert c.total_beads == 102 and {l.color_id: l.required for l in c.lines} == {"s01": 67, "s14": 35}
+    acc = estimate_accessories("necklace", 20, 24, None, {"sequence": ["s01"], "lengthCm": 40})
+    assert next(a for a in acc if a.id == "strand-thread").quantity == "约 0.7 m"
+    assert "40 cm" in next(a for a in acc if a.id == "extender").reason
+
+    idea = MockProvider(CAT).generate_ideas(EXAMPLE, parse_prompt(EXAMPLE), 4)[0]
+    assert all(c in CAT for c in idea.strand_sequence)
+    assert idea.estimated_beads == round((20 * 24 + 308) / 10) * 10

@@ -1,6 +1,6 @@
 // Engine C：Material Planning Engine（MVP：不接入价格与库存数据）
 //
-// Required       = Pattern 中某色号的珠子总数
+// Required       = Pattern 中某色号的珠子总数（方格图纸 + 项链串链）
 // Reserve        = ceil(Required × 损耗比例)
 // PurchaseNeeded = Required + Reserve
 // Packages       = ceil(PurchaseNeeded / 单包装可用颗数)
@@ -8,6 +8,7 @@
 
 import type { AccessoryLine, BeadColor, ItemType, MaterialLine, MaterialSummary, Pattern } from '../types';
 import { countColors } from '../pattern';
+import { expandStrand, strandBeadCount } from '../pattern/strand';
 
 export interface MaterialOptions {
   /** 损耗比例，0.1 = 10% */
@@ -61,12 +62,18 @@ function summarize(lines: MaterialLine[], totalBeads: number): MaterialSummary {
   return { lines, totalBeads, colorCount: lines.length, totalPackages, needsConfirmation };
 }
 
+/** 图纸中逐颗的色号：方格 cells + 展开后的串链 */
+function allBeads(pattern: Pick<Pattern, 'cells' | 'strand'>): string[] {
+  return pattern.strand ? pattern.cells.concat(expandStrand(pattern.strand)) : pattern.cells;
+}
+
 export function calculateMaterials(
-  pattern: Pick<Pattern, 'cells'>,
+  pattern: Pick<Pattern, 'cells' | 'strand'>,
   catalog: Map<string, BeadColor>,
   options: MaterialOptions = DEFAULT_MATERIAL_OPTIONS,
 ): MaterialSummary {
-  const counts = countColors(pattern.cells);
+  const beads = allBeads(pattern);
+  const counts = countColors(beads);
   // 按用量降序，用量相同按 id
   const entries = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   const lines = entries.map(([colorId, required]) => {
@@ -74,16 +81,16 @@ export function calculateMaterials(
     if (!color) throw new Error(`Pattern 引用了不存在的色号：${colorId}`);
     return lineFor(colorId, required, color, options.wastageRate);
   });
-  return summarize(lines, pattern.cells.length);
+  return summarize(lines, beads.length);
 }
 
 /** 合并多个图纸的采购清单：先按色号累加用量，再统一计算损耗与包装 */
 export function mergeShoppingLists(
-  patterns: Pick<Pattern, 'cells'>[],
+  patterns: Pick<Pattern, 'cells' | 'strand'>[],
   catalog: Map<string, BeadColor>,
   options: MaterialOptions = DEFAULT_MATERIAL_OPTIONS,
 ): MaterialSummary {
-  return calculateMaterials({ cells: patterns.flatMap((p) => p.cells) }, catalog, options);
+  return calculateMaterials({ cells: patterns.flatMap(allBeads) }, catalog, options);
 }
 
 /**
@@ -92,7 +99,7 @@ export function mergeShoppingLists(
  */
 export function estimateAccessories(
   itemType: ItemType,
-  pattern: Pick<Pattern, 'width' | 'height'>,
+  pattern: Pick<Pattern, 'width' | 'height' | 'strand'>,
   opts: { wearLengthCm?: number } = {},
 ): AccessoryLine[] {
   // 方格平织（square stitch）每行约穿线 3 次行宽；加收尾 60 cm。仅为估算。
@@ -102,17 +109,30 @@ export function estimateAccessories(
     { id: 'thread', name: '串珠线', quantity: `约 ${threadM} m`, reason: `按 ${pattern.height} 行方格平织往返穿线 + 收尾估算`, status: 'estimated' },
     { id: 'needle', name: '串珠针 #12', quantity: '1 根', reason: '适配 Delica 11/0 孔径', status: 'calculated' },
   ];
+  const strand = pattern.strand;
+  if (strand) {
+    // 串链单股穿线，两端各留 15 cm 收尾
+    const strandM = Math.ceil(((strand.lengthCm + 30) / 100) * 10) / 10;
+    base.push({
+      id: 'strand-thread',
+      name: '串链用线',
+      quantity: `约 ${strandM} m`,
+      reason: `串链 ${strand.lengthCm} cm（约 ${strandBeadCount(strand.lengthCm)} 颗）单股穿线 + 两端收尾`,
+      status: 'estimated',
+    });
+  }
+  const wearLengthCm = opts.wearLengthCm ?? strand?.lengthCm;
   switch (itemType) {
     case 'necklace':
     case 'pendant':
       return base.concat([
         { id: 'clasp', name: '龙虾扣', quantity: '1 个', reason: '项链开合需要', status: 'calculated' },
-        { id: 'jumpring', name: '金属连接环 4 mm', quantity: '3 个', reason: '吊坠挂环 ×1 · 链条两端 ×2', status: 'calculated' },
+        { id: 'jumpring', name: '金属连接环 4 mm', quantity: '3 个', reason: strand ? '吊坠挂环 ×1 · 串链两端 ×2' : '吊坠挂环 ×1 · 链条两端 ×2', status: 'calculated' },
         {
           id: 'extender',
           name: '延长链',
-          quantity: opts.wearLengthCm ? '5 cm × 1' : '待定',
-          reason: opts.wearLengthCm ? `佩戴长度 ${opts.wearLengthCm} cm，是否需要延长请确认` : '取决于最终佩戴长度',
+          quantity: wearLengthCm ? '5 cm × 1' : '待定',
+          reason: wearLengthCm ? `佩戴长度 ${wearLengthCm} cm，是否需要延长请确认` : '取决于最终佩戴长度',
           status: 'needs-confirmation',
         },
         { id: 'bail', name: '吊坠连接方式', quantity: '—', reason: '珠环 / 金属扣头二选一，结构需人工确认', status: 'needs-confirmation' },

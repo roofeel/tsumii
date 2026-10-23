@@ -12,6 +12,7 @@ from .engines.ai.base import DesignIdea as IdeaDC
 from .engines.materials import calculate_materials, estimate_accessories
 from .engines.motifs import default_size, render_motif
 from .engines.pattern import count_colors, validate_pattern
+from .engines.strand import expand_strand, strand_for_item, validate_strand
 from .exports.common import SheetSource
 from .models import DesignIdea, DesignVariant, Pattern, PatternVersion, Project, ShoppingList
 from .schemas import PatternOut, ProjectOut, ProjectSummaryOut, camelize
@@ -59,10 +60,15 @@ def save_idea(db: Session, user_id: str, idea: IdeaDC, task_id: str | None = Non
 
 
 # ---------- 项目与图纸 ----------
-def ensure_valid_cells(cells: list[str], width: int, height: int) -> None:
-    errors = validate_pattern(cells, width, height, get_catalog())
+def ensure_valid_cells(cells: list[str], width: int, height: int, strand: dict | None = None) -> None:
+    errors = validate_pattern(cells, width, height, get_catalog()) + validate_strand(strand, get_catalog())
     if errors:
         raise HTTPException(422, {"message": "图纸验证未通过", "errors": errors})
+
+
+def all_beads(pat: Pattern) -> list[str]:
+    """逐颗色号：方格 cells + 展开后的串链，用于材料计算"""
+    return list(pat.cells) + expand_strand(pat.strand)
 
 
 def create_project(
@@ -78,12 +84,18 @@ def create_project(
     description: str = "",
     idea_id: str | None = None,
     variant_id: str | None = None,
+    strand: dict | None = None,
 ) -> Project:
-    ensure_valid_cells(cells, width, height)
+    ensure_valid_cells(cells, width, height, strand)
     p = Project(user_id=user_id, name=name, description=description, item_type=item_type, creation_mode=creation_mode, status="editing", idea_id=idea_id)
-    p.pattern = Pattern(width=width, height=height, cells=list(cells), components=[{"id": "main", "x": 0, "y": 0, "width": width, "height": height}], variant_id=variant_id)
-    p.pattern.versions.append(PatternVersion(version=1, width=width, height=height, cells=list(cells), note="v1 · 初始生成"))
-    p.shopping_list = ShoppingList(wear_length_cm=42 if item_type == "necklace" else None)
+    p.pattern = Pattern(
+        width=width, height=height, cells=list(cells), strand=strand,
+        components=[{"id": "main", "x": 0, "y": 0, "width": width, "height": height}], variant_id=variant_id,
+    )
+    p.pattern.versions.append(PatternVersion(version=1, width=width, height=height, cells=list(cells), strand=strand, note="v1 · 初始生成"))
+    # 有串链时佩戴长度取串链长度
+    wear = strand["lengthCm"] if strand else 42 if item_type == "necklace" else None
+    p.shopping_list = ShoppingList(wear_length_cm=wear)
     db.add(p)
     db.flush()
     return p
@@ -114,15 +126,22 @@ def create_project_from_idea(db: Session, user_id: str, idea_id: str, variant_id
         description=idea.description,
         idea_id=idea_row.id,
         variant_id=variant_id,
+        # 项链的主链单独保存，方格图纸只包含吊坠
+        strand=strand_for_item(idea.item_type, idea.strand_sequence, get_catalog()),
     )
 
 
-def update_pattern(p: Project, width: int, height: int, cells: list[str], base_revision: int | None) -> Pattern:
+_KEEP = object()
+
+
+def update_pattern(p: Project, width: int, height: int, cells: list[str], base_revision: int | None, strand=_KEEP) -> Pattern:
+    """strand 不传时保留原串链；传 None 删除串链"""
     pat = p.pattern
     if base_revision is not None and base_revision != pat.revision:
         raise HTTPException(409, {"message": "图纸已在其他地方修改，请刷新后再试", "revision": pat.revision})
-    ensure_valid_cells(cells, width, height)
-    pat.width, pat.height, pat.cells = width, height, list(cells)
+    new_strand = pat.strand if strand is _KEEP else strand
+    ensure_valid_cells(cells, width, height, new_strand)
+    pat.width, pat.height, pat.cells, pat.strand = width, height, list(cells), new_strand
     pat.revision += 1
     p.updated_at = now()
     if p.status == "draft":
@@ -133,7 +152,9 @@ def update_pattern(p: Project, width: int, height: int, cells: list[str], base_r
 def save_version(p: Project, note: str) -> PatternVersion:
     pat = p.pattern
     pat.version += 1
-    v = PatternVersion(version=pat.version, width=pat.width, height=pat.height, cells=list(pat.cells), note=note or f"v{pat.version} · 手动保存")
+    v = PatternVersion(
+        version=pat.version, width=pat.width, height=pat.height, cells=list(pat.cells), strand=pat.strand, note=note or f"v{pat.version} · 手动保存"
+    )
     pat.versions.append(v)
     return v
 
@@ -144,6 +165,9 @@ def restore_version(p: Project, version: int) -> Pattern:
         raise HTTPException(404, "版本不存在")
     pat = p.pattern
     pat.width, pat.height, pat.cells = v.width, v.height, list(v.cells)
+    # 旧版本没有串链快照时保留当前串链
+    if v.strand is not None:
+        pat.strand = v.strand
     pat.revision += 1
     p.updated_at = now()
     return pat
@@ -151,8 +175,9 @@ def restore_version(p: Project, version: int) -> Pattern:
 
 def pattern_out(pat: Pattern) -> PatternOut:
     return PatternOut(
-        id=pat.id, bead_type=pat.bead_type, layout_type=pat.layout_type, width=pat.width, height=pat.height, cells=list(pat.cells),
-        version=pat.version, revision=pat.revision, validation_errors=validate_pattern(pat.cells, pat.width, pat.height, get_catalog(), pat.layout_type),
+        id=pat.id, bead_type=pat.bead_type, layout_type=pat.layout_type, width=pat.width, height=pat.height, cells=list(pat.cells), strand=pat.strand,
+        version=pat.version, revision=pat.revision,
+        validation_errors=validate_pattern(pat.cells, pat.width, pat.height, get_catalog(), pat.layout_type) + validate_strand(pat.strand, get_catalog()),
     )
 
 
@@ -167,7 +192,7 @@ def project_out(p: Project) -> ProjectOut:
 def project_summary(p: Project) -> ProjectSummaryOut:
     return ProjectSummaryOut(
         id=p.id, name=p.name, status=p.status, item_type=p.item_type, width=p.pattern.width, height=p.pattern.height,
-        color_count=len(count_colors(p.pattern.cells)), updated_at=p.updated_at, exported_at=p.exported_at,
+        color_count=len(count_colors(all_beads(p.pattern))), updated_at=p.updated_at, exported_at=p.exported_at,
     )
 
 
@@ -180,8 +205,8 @@ def materials_payload(p: Project, wastage: float | None = None) -> dict:
     sl = p.shopping_list
     rate = sl.wastage_rate if wastage is None else wastage
     catalog = get_catalog()
-    summary = calculate_materials(p.pattern.cells, catalog, rate)
-    acc = estimate_accessories(p.item_type, p.pattern.width, p.pattern.height, sl.wear_length_cm)
+    summary = calculate_materials(all_beads(p.pattern), catalog, rate)
+    acc = estimate_accessories(p.item_type, p.pattern.width, p.pattern.height, sl.wear_length_cm, p.pattern.strand)
     lines = []
     for l in summary.lines:
         d = camelize(l.__dict__)
@@ -214,6 +239,8 @@ def sheet_source(p: Project) -> SheetSource:
         width=p.pattern.width,
         height=p.pattern.height,
         cells=list(p.pattern.cells),
+        strand=p.pattern.strand,
+        wear_length_cm=p.shopping_list.wear_length_cm,
         version=p.pattern.version,
         description=p.description,
         style_tags=idea.style_tags if idea else [],

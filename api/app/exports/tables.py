@@ -17,7 +17,7 @@ PART_HEADER = ["配件", "数量", "说明", "状态"]
 
 
 def _rows(src: SheetSource, catalog: Catalog):
-    summary = calculate_materials(src.cells, catalog, src.wastage_rate)
+    summary = calculate_materials(src.all_beads, catalog, src.wastage_rate)
     beads = [
         [
             l.code,
@@ -34,7 +34,7 @@ def _rows(src: SheetSource, catalog: Catalog):
         ]
         for l in summary.lines
     ]
-    parts = [[a.name, a.quantity, a.reason, STATUS_ZH[a.status]] for a in estimate_accessories(src.item_type, src.width, src.height)]
+    parts = [[a.name, a.quantity, a.reason, STATUS_ZH[a.status]] for a in estimate_accessories(src.item_type, src.width, src.height, src.wear_length_cm, src.strand)]
     return summary, beads, parts
 
 

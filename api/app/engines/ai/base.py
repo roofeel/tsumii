@@ -25,6 +25,7 @@ class DesignIdea:
     style_tags: list[str]
     description: str
     palette: list[str]
+    # 项链主链的色序循环单元（色卡 id；旧数据可能为 hex）
     strand_sequence: list[str]
     motif: str
     estimated_colors: int

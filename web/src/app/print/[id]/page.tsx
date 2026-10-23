@@ -11,6 +11,7 @@ import { useApp, useHydrated } from '@/store';
 import { ACTIVE_CATALOG, catalogById, isCatalogVerified } from '@/lib/catalog';
 import { calculateMaterials, estimateAccessories } from '@/lib/materials';
 import { productSizeCm, rowRuns, validatePattern } from '@/lib/pattern';
+import { strandRepeats } from '@/lib/pattern/strand';
 import { patternToPngDataUrl } from '@/lib/render';
 import { DIFFICULTY_LABEL, ITEM_LABEL } from '@/lib/i18n';
 
@@ -25,7 +26,7 @@ export default function PrintPage() {
 
   const legendOrder = useMemo(() => {
     if (!project) return [] as string[];
-    return [...new Set(project.pattern.cells)].sort((a, b) => ACTIVE_CATALOG.findIndex((c) => c.id === a) - ACTIVE_CATALOG.findIndex((c) => c.id === b));
+    return [...new Set(project.pattern.cells.concat(project.pattern.strand?.sequence ?? []))].sort((a, b) => ACTIVE_CATALOG.findIndex((c) => c.id === a) - ACTIVE_CATALOG.findIndex((c) => c.id === b));
   }, [project]);
   const codeIndex = useMemo(() => new Map(legendOrder.map((cid, i) => [cid, i + 1])), [legendOrder]);
 
@@ -44,7 +45,8 @@ export default function PrintPage() {
 
   const p = project.pattern;
   const summary = calculateMaterials(p, catalog, { wastageRate });
-  const accessories = estimateAccessories(project.itemType, p, { wearLengthCm: project.itemType === 'necklace' ? 42 : undefined });
+  const accessories = estimateAccessories(project.itemType, p, { wearLengthCm: project.itemType === 'necklace' && !p.strand ? 42 : undefined });
+  const strandInfo = p.strand ? strandRepeats(p.strand) : null;
   const errors = validatePattern(p, catalog);
   const size = productSizeCm(p.width, p.height);
   const verified = isCatalogVerified(ACTIVE_CATALOG);
@@ -89,7 +91,7 @@ export default function PrintPage() {
 
       <section className="mt-5 grid grid-cols-2 gap-5 break-inside-avoid">
         <figure className="flex flex-col items-center justify-center rounded-xl bg-ivory p-4">
-          {project.idea ? <NecklacePreview idea={project.idea} catalog={catalog} height={220} /> : <PatternThumb pattern={p} catalog={catalog} maxSize={220} />}
+          {project.idea ? <NecklacePreview idea={project.idea} catalog={catalog} height={220} strand={p.strand} /> : <PatternThumb pattern={p} catalog={catalog} maxSize={220} />}
           <figcaption className="mt-2 text-xs text-muted">作品效果图</figcaption>
         </figure>
         <dl className="grid grid-cols-2 content-start gap-3 text-sm">
@@ -98,7 +100,8 @@ export default function PrintPage() {
             ['主题', project.idea?.styleTags.join(' · ') || '—'],
             ['珠子类型', 'MIYUKI Delica 11/0'],
             ['排列方式', '平面方格（Square stitch / Loom）'],
-            ['图纸尺寸', `${p.width} 列 × ${p.height} 行`],
+            [p.strand ? '吊坠图纸' : '图纸尺寸', `${p.width} 列 × ${p.height} 行`],
+            ...(p.strand && strandInfo ? [['串链', `${p.strand.lengthCm} cm · 约 ${strandInfo.total} 颗`]] : []),
             ['成品尺寸', `约 ${size.w} × ${size.h} cm（不含配件）`],
             ['珠子总数', `${summary.totalBeads} 颗 · ${summary.colorCount} 色`],
             ['难度', project.idea ? DIFFICULTY_LABEL.zh[project.idea.difficulty] : '—'],
@@ -112,10 +115,29 @@ export default function PrintPage() {
       </section>
 
       <section className="mt-6 break-inside-avoid">
-        <h2 className="mb-2 text-base font-bold">串珠网格图 · 行列坐标</h2>
+        <h2 className="mb-2 text-base font-bold">{p.strand ? '吊坠网格图 · 行列坐标' : '串珠网格图 · 行列坐标'}</h2>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {gridImg && <img src={gridImg} alt="带行列坐标与色号编号的完整串珠网格图" className="mx-auto max-h-[900px] max-w-full" />}
       </section>
+
+      {p.strand && strandInfo && (
+        <section className="mt-6 break-inside-avoid">
+          <h2 className="mb-2 text-base font-bold">串链串法</h2>
+          <p className="text-[13px] text-body">
+            单股穿线，按下面的循环单元从一端串起：重复 {strandInfo.repeats} 次
+            {strandInfo.remainder ? `，最后再串单元的前 ${strandInfo.remainder} 颗` : ''}，共约 {strandInfo.total} 颗（{p.strand.lengthCm} cm，不含吊坠与扣件）。
+            串完后两端接连接环与龙虾扣，吊坠挂在串链正中。
+          </p>
+          <ol className="mt-2 flex flex-wrap gap-1.5" aria-label="串链循环单元">
+            {p.strand.sequence.map((cid, i) => (
+              <li key={i} className="inline-flex items-center gap-1 rounded-md border border-warm bg-paper px-1.5 py-1 font-mono text-xs">
+                <Swatch hex={catalog.get(cid)?.hex ?? '#ccc'} size={12} round />
+                {codeIndex.get(cid)}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       <section className="mt-6 break-inside-avoid">
         <h2 className="mb-2 text-base font-bold">色号图例与材料清单</h2>

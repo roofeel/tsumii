@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ..engines.strand import expand_strand
+
 
 @dataclass
 class SheetSource:
@@ -12,6 +14,9 @@ class SheetSource:
     width: int
     height: int
     cells: list[str]
+    # 项链主链 {"sequence": [...], "lengthCm": n}
+    strand: dict | None = None
+    wear_length_cm: float | None = None
     version: int = 1
     description: str = ""
     style_tags: list[str] = field(default_factory=list)
@@ -20,6 +25,11 @@ class SheetSource:
     wastage_rate: float = 0.1
     bought: dict[str, bool] = field(default_factory=dict)
     out_of_stock: dict[str, bool] = field(default_factory=dict)
+
+    @property
+    def all_beads(self) -> list[str]:
+        """逐颗色号：方格 cells + 展开后的串链"""
+        return list(self.cells) + expand_strand(self.strand)
 
 
 ITEM_ZH = {"necklace": "项链", "bracelet": "手链", "earring": "耳饰", "pendant": "吊坠", "bookmark": "书签", "brooch": "胸针"}

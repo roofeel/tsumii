@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getProvider } from '@/lib/ai';
 import { createClient } from '@/lib/api/client';
+import { requireInvite } from '@/lib/invite';
 import type { DesignIdea } from '@/lib/types';
 
 const BACKEND_URL = process.env.BACKEND_URL;
 
 export async function POST(req: Request) {
+  const denied = requireInvite(req);
+  if (denied) return denied;
   const body = (await req.json().catch(() => ({}))) as { idea?: DesignIdea; rootIdeaId?: string; instruction?: string; parentVariantId?: string };
   if (!body.idea || !body.instruction?.trim()) {
     return NextResponse.json({ error: '缺少方案或修改要求' }, { status: 400 });

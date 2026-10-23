@@ -8,16 +8,21 @@ import { LangSwitch } from '@/components/Header';
 import { Logo } from '@/components/Logo';
 import { PatternThumb } from '@/components/PatternThumb';
 import { SampleBadge } from '@/components/SampleBadge';
+import { StrandEditor } from '@/components/StrandEditor';
 import { Swatch } from '@/components/Swatch';
 import { useApp, useHydrated, useT } from '@/store';
 import { ACTIVE_CATALOG, catalogById, colorLabel, isCatalogVerified } from '@/lib/catalog';
 import { countColors, floodFill, productSizeCm, replaceInRect, rowRuns, validatePattern } from '@/lib/pattern';
 import { calculateMaterials } from '@/lib/materials';
+import { expandStrand, hasStrand, strandForItem } from '@/lib/pattern/strand';
+import type { Strand } from '@/lib/types';
 import { guessBackground, planLocalEdit } from '@/lib/ai/local';
 import { patternToPngDataUrl, type ViewMode } from '@/lib/render';
 import { downloadBlob, downloadDataUrl, projectJson, safeFilename } from '@/lib/export';
 
 type Tool = 'brush' | 'eraser' | 'picker' | 'fill' | 'select';
+/** 撤销 / 重做的快照：方格图纸与串链一起记录 */
+type Snap = { cells: string[]; strand?: Strand };
 
 const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: 'brush', label: '画笔', key: 'B', icon: 'M3 21c3 0 5-2 5-4.5S10 13 12 13l7-7a2 2 0 0 0-3-3l-7 7c0 2-1.5 4-4.5 4S3 18 3 21z' },
@@ -39,12 +44,13 @@ export default function EditorPage() {
   const hydrated = useHydrated();
   const { lang } = useT();
   const project = useApp((s) => s.projects[id]);
-  const { updateCells, saveVersion, restoreVersion, wastageRate, setWastageRate } = useApp();
+  const { updateCells, updateStrand, saveVersion, restoreVersion, wastageRate, setWastageRate } = useApp();
   const catalog = useMemo(() => catalogById(ACTIVE_CATALOG), []);
 
   const [cells, setCells] = useState<string[]>([]);
-  const [past, setPast] = useState<string[][]>([]);
-  const [future, setFuture] = useState<string[][]>([]);
+  const [strand, setStrand] = useState<Strand | undefined>(undefined);
+  const [past, setPast] = useState<Snap[]>([]);
+  const [future, setFuture] = useState<Snap[]>([]);
   const [tool, setTool] = useState<Tool>('brush');
   const [view, setView] = useState<ViewMode>('bead');
   const [active, setActive] = useState<string>('');
@@ -63,6 +69,7 @@ export default function EditorPage() {
     if (!project || loadedFor.current === project.id) return;
     loadedFor.current = project.id;
     setCells(project.pattern.cells);
+    setStrand(project.pattern.strand);
     const counts = countColors(project.pattern.cells);
     const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
     setActive(sorted[1]?.[0] ?? sorted[0]?.[0] ?? ACTIVE_CATALOG[0].id);
@@ -77,6 +84,11 @@ export default function EditorPage() {
     const h = setTimeout(() => updateCells(project.id, cells), 250);
     return () => clearTimeout(h);
   }, [cells, project, updateCells]);
+  useEffect(() => {
+    if (!project || !strand || strand === project.pattern.strand) return;
+    const h = setTimeout(() => updateStrand(project.id, strand), 250);
+    return () => clearTimeout(h);
+  }, [strand, project, updateStrand]);
 
   const W = project?.pattern.width ?? 0;
   const H = project?.pattern.height ?? 0;
@@ -85,12 +97,17 @@ export default function EditorPage() {
   const commit = useCallback(
     (next: string[], before: string[]) => {
       if (next === before) return;
-      setPast((p) => [...p.slice(-99), before]);
+      setPast((p) => [...p.slice(-99), { cells: before, strand }]);
       setFuture([]);
       setCells(next);
     },
-    [],
+    [strand],
   );
+  const commitStrand = (next: Strand) => {
+    setPast((p) => [...p.slice(-99), { cells, strand }]);
+    setFuture([]);
+    setStrand(next);
+  };
 
   const paintAt = (index: number, base: string[]): string[] => {
     if (tool === 'brush') return base[index] === active ? base : Object.assign(base.slice(), { [index]: active });
@@ -120,23 +137,27 @@ export default function EditorPage() {
     const before = stroke.current.before;
     stroke.current.before = null;
     if (before && before !== cells) {
-      setPast((p) => [...p.slice(-99), before]);
+      setPast((p) => [...p.slice(-99), { cells: before, strand }]);
       setFuture([]);
     }
   };
 
   const undo = useCallback(() => {
     if (!past.length) return;
-    setFuture([cells, ...future]);
-    setCells(past[past.length - 1]);
+    const prev = past[past.length - 1];
+    setFuture([{ cells, strand }, ...future]);
+    setCells(prev.cells);
+    setStrand(prev.strand);
     setPast(past.slice(0, -1));
-  }, [past, future, cells]);
+  }, [past, future, cells, strand]);
   const redo = useCallback(() => {
     if (!future.length) return;
-    setPast([...past, cells]);
-    setCells(future[0]);
+    const next = future[0];
+    setPast([...past, { cells, strand }]);
+    setCells(next.cells);
+    setStrand(next.strand);
     setFuture(future.slice(1));
-  }, [past, future, cells]);
+  }, [past, future, cells, strand]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -158,14 +179,16 @@ export default function EditorPage() {
   }, [undo, redo, H]);
 
   const counts = useMemo(() => countColors(cells), [cells]);
+  // 色号列表显示的用量包含串链
+  const totalCounts = useMemo(() => (strand ? countColors(cells.concat(expandStrand(strand))) : counts), [cells, strand, counts]);
   const usedIds = useMemo(() => {
-    const ids = [...counts.keys()];
+    const ids = [...totalCounts.keys()];
     if (active && !ids.includes(active)) ids.push(active);
     return ids.sort((a, b) => ACTIVE_CATALOG.findIndex((c) => c.id === a) - ACTIVE_CATALOG.findIndex((c) => c.id === b));
-  }, [counts, active]);
+  }, [totalCounts, active]);
   const codeIndex = useMemo(() => new Map(usedIds.map((cid, i) => [cid, i + 1])), [usedIds]);
-  const summary = useMemo(() => (cells.length ? calculateMaterials({ cells }, catalog, { wastageRate }) : null), [cells, catalog, wastageRate]);
-  const errors = useMemo(() => (project && cells.length ? validatePattern({ ...project.pattern, cells }, catalog) : []), [project, cells, catalog]);
+  const summary = useMemo(() => (cells.length ? calculateMaterials({ cells, strand }, catalog, { wastageRate }) : null), [cells, strand, catalog, wastageRate]);
+  const errors = useMemo(() => (project && cells.length ? validatePattern({ ...project.pattern, cells, strand }, catalog) : []), [project, cells, strand, catalog]);
   const runs = useMemo(() => (cells.length ? rowRuns(cells, W, row) : []), [cells, W, row]);
 
   if (!hydrated) return null;
@@ -192,6 +215,15 @@ export default function EditorPage() {
     }
     commit(replaceInRect(cells, W, selection, plan.map), cells);
     setAiMsg(plan.summary);
+  };
+
+  // 旧项目补建串链：优先用方案的串链色序，否则取图纸中用量最多的两个颜色
+  const newStrand = (): Strand => {
+    const fromIdea = project.idea ? strandForItem(project.itemType, project.idea.strandSequence, ACTIVE_CATALOG) : undefined;
+    if (fromIdea) return fromIdea;
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([cid]) => cid);
+    const [a, b = a] = top;
+    return strandForItem(project.itemType, [a, a, b], ACTIVE_CATALOG)!;
   };
 
   const size = productSizeCm(W, H);
@@ -307,7 +339,7 @@ export default function EditorPage() {
                         </span>
                         <span className="truncate text-[11px] text-muted">{colorLabel(c, lang)}</span>
                       </span>
-                      <span className="ml-auto font-mono text-[11px] text-muted">{highlight === cid ? '高亮' : counts.get(cid) ?? 0}</span>
+                      <span className="ml-auto font-mono text-[11px] text-muted">{highlight === cid ? '高亮' : totalCounts.get(cid) ?? 0}</span>
                     </button>
                   </li>
                 );
@@ -327,7 +359,7 @@ export default function EditorPage() {
                 }}
               >
                 <option value="">从色卡选择…</option>
-                {ACTIVE_CATALOG.filter((c) => !counts.has(c.id)).map((c) => (
+                {ACTIVE_CATALOG.filter((c) => !totalCounts.has(c.id)).map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.code} · {colorLabel(c, lang)}
                   </option>
@@ -391,6 +423,18 @@ export default function EditorPage() {
               </figure>
             )}
           </div>
+          {strand ? (
+            <StrandEditor strand={strand} catalog={catalog} active={active} codeIndex={codeIndex} onChange={commitStrand} />
+          ) : (
+            hasStrand(project.itemType) && (
+              <div className="flex flex-wrap items-center gap-3 border-t border-[#E3DFD7] bg-white px-5 py-3 text-xs text-body">
+                <span>这条项链还没有串链，当前图纸只包含吊坠。</span>
+                <button type="button" className="btn-ghost !px-3 !py-1.5 text-xs" onClick={() => commitStrand(newStrand())}>
+                  添加串链
+                </button>
+              </div>
+            )
+          )}
           <div className="flex flex-wrap items-center gap-3 border-t border-[#E3DFD7] bg-white px-5 py-3">
             <span className="text-[13px] font-bold">制作步骤</span>
             <button type="button" aria-label="上一行" onClick={() => setRow((r) => Math.max(0, r - 1))} className="btn-ghost h-8 w-8 !p-0">
@@ -503,7 +547,10 @@ export default function EditorPage() {
                     type="button"
                     className="shrink-0 text-matcha-deep underline"
                     onClick={() => {
-                      commit(v.cells.slice(), cells);
+                      setPast((p) => [...p.slice(-99), { cells, strand }]);
+                      setFuture([]);
+                      setCells(v.cells.slice());
+                      if (v.strand) setStrand(v.strand);
                       restoreVersion(project.id, v.version);
                     }}
                   >
@@ -522,7 +569,7 @@ export default function EditorPage() {
             >
               导出 PNG
             </button>
-            <button type="button" className="btn-ghost !px-3 !py-2 text-xs" onClick={() => downloadBlob(`${safeFilename(project.name)}.tsumii.json`, projectJson({ ...project, pattern: { ...project.pattern, cells } }), 'application/json')}>
+            <button type="button" className="btn-ghost !px-3 !py-2 text-xs" onClick={() => downloadBlob(`${safeFilename(project.name)}.tsumii.json`, projectJson({ ...project, pattern: { ...project.pattern, cells, strand } }), 'application/json')}>
               导出 Project JSON
             </button>
             <Link href={`/print/${project.id}`} className="btn-ghost !px-3 !py-2 text-xs">

@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
+import { useInviteGate } from '@/components/InviteDialog';
 import { NecklacePreview } from '@/components/NecklacePreview';
 import { SampleBadge } from '@/components/SampleBadge';
 import { Swatch } from '@/components/Swatch';
@@ -10,6 +11,7 @@ import { useApp, useHydrated, useT } from '@/store';
 import { ACTIVE_CATALOG, catalogById, isCatalogVerified } from '@/lib/catalog';
 import { parsePrompt } from '@/lib/ai/parse';
 import { defaultSize, renderMotif } from '@/lib/pattern/motifs';
+import { strandForItem } from '@/lib/pattern/strand';
 import { DIFFICULTY_LABEL, ITEM_LABEL } from '@/lib/i18n';
 import type { DesignIdea, DesignVariant, Difficulty, ItemType, ParsedBrief } from '@/lib/types';
 
@@ -23,6 +25,7 @@ function CreateInner() {
   const { t, lang } = useT();
   const { session, setSession, createProject } = useApp();
   const catalog = useMemo(() => catalogById(ACTIVE_CATALOG), []);
+  const { withInvite, dialog: inviteDialog } = useInviteGate();
 
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [override, setOverride] = useState<Partial<ParsedBrief>>({});
@@ -40,11 +43,14 @@ function CreateInner() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch('/api/ideas', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: text, count: n, brief: extra }),
-        });
+        const res = await withInvite((headers) =>
+          fetch('/api/ideas', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify({ prompt: text, count: n, brief: extra }),
+          }),
+        );
+        if (!res) throw new Error('需要邀请码才能使用 AI 生成');
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? '生成失败');
         setSession({ prompt: text, ideas: data.ideas as DesignIdea[], pickedId: (data.ideas as DesignIdea[])[0]?.id ?? null, variants: [] });
@@ -54,7 +60,7 @@ function CreateInner() {
         setLoading(false);
       }
     },
-    [setSession],
+    [setSession, withInvite],
   );
 
   // 从首页跳转过来：带上提示词并自动生成
@@ -76,11 +82,14 @@ function CreateInner() {
     setRefining(true);
     setError(null);
     try {
-      const res = await fetch('/api/refine', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idea: current, rootIdeaId: picked?.id, instruction: text, parentVariantId: latest?.id }),
-      });
+      const res = await withInvite((headers) =>
+        fetch('/api/refine', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...headers },
+          body: JSON.stringify({ idea: current, rootIdeaId: picked?.id, instruction: text, parentVariantId: latest?.id }),
+        }),
+      );
+      if (!res) throw new Error('需要邀请码才能使用 AI 二次设计');
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? '修改失败');
       const v = data.variant as DesignVariant;
@@ -105,6 +114,8 @@ function CreateInner() {
       width: size.width,
       height: size.height,
       cells: renderMotif(current.motif, current.palette, size),
+      // 项链的主链单独保存，方格图纸只包含吊坠
+      strand: strandForItem(current.itemType, current.strandSequence, ACTIVE_CATALOG),
       idea: current,
       variants: pickedVariants,
     });
@@ -341,6 +352,7 @@ function CreateInner() {
           )}
         </section>
       </main>
+      {inviteDialog}
     </>
   );
 }

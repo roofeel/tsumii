@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { CreationMode, DesignIdea, DesignVariant, ItemType, Lang, Project, ProjectStatus } from '@/lib/types';
+import type { CreationMode, DesignIdea, DesignVariant, ItemType, Lang, Project, ProjectStatus, Strand } from '@/lib/types';
 import { createPattern, snapshot, uid } from '@/lib/pattern';
 import { defaultSize, renderMotif } from '@/lib/pattern/motifs';
 import { translate, type MessageKey } from '@/lib/i18n';
@@ -18,6 +18,8 @@ export interface NewProjectInput {
   width: number;
   height: number;
   cells: string[];
+  /** 项链主链 */
+  strand?: Strand;
   idea?: DesignIdea;
   variants?: DesignVariant[];
 }
@@ -25,6 +27,8 @@ export interface NewProjectInput {
 interface AppState {
   lang: Lang;
   wastageRate: number;
+  /** 已验证的 AI 邀请码（服务端每次调用都会再次校验） */
+  inviteCode: string | null;
   projects: Record<string, Project>;
   order: string[];
   seeded: boolean;
@@ -32,10 +36,12 @@ interface AppState {
   session: { prompt: string; ideas: DesignIdea[]; pickedId: string | null; variants: DesignVariant[] };
 
   setLang: (l: Lang) => void;
+  setInviteCode: (code: string | null) => void;
   setWastageRate: (r: number) => void;
   setSession: (s: Partial<AppState['session']>) => void;
   createProject: (input: NewProjectInput) => string;
   updateCells: (id: string, cells: string[]) => void;
+  updateStrand: (id: string, strand: Strand) => void;
   saveVersion: (id: string, note: string) => void;
   restoreVersion: (id: string, version: number) => void;
   setStatus: (id: string, status: ProjectStatus) => void;
@@ -50,7 +56,7 @@ const now = () => new Date().toISOString();
 
 function buildProject(input: NewProjectInput): Project {
   const id = uid('prj');
-  const pattern = createPattern({ projectId: id, width: input.width, height: input.height, cells: input.cells });
+  const pattern = createPattern({ projectId: id, width: input.width, height: input.height, cells: input.cells, strand: input.strand });
   return {
     id,
     name: input.name,
@@ -88,12 +94,14 @@ export const useApp = create<AppState>()(
     (set, get) => ({
       lang: 'zh',
       wastageRate: 0.1,
+      inviteCode: null,
       projects: {},
       order: [],
       seeded: false,
       session: { prompt: '', ideas: [], pickedId: null, variants: [] },
 
       setLang: (lang) => set({ lang }),
+      setInviteCode: (inviteCode) => set({ inviteCode }),
       setWastageRate: (wastageRate) => set({ wastageRate: Math.max(0, Math.min(0.5, wastageRate)) }),
       setSession: (s) => set({ session: { ...get().session, ...s } }),
 
@@ -116,6 +124,19 @@ export const useApp = create<AppState>()(
           };
         }),
 
+      updateStrand: (id, strand) =>
+        set((st) => {
+          const p = st.projects[id];
+          if (!p) return st;
+          return {
+            projects: {
+              ...st.projects,
+              [id]: { ...p, status: p.status === 'draft' ? 'editing' : p.status, updatedAt: now(), pattern: { ...p.pattern, strand } },
+            },
+            order: [id, ...st.order.filter((x) => x !== id)],
+          };
+        }),
+
       saveVersion: (id, note) =>
         set((st) => {
           const p = st.projects[id];
@@ -133,7 +154,12 @@ export const useApp = create<AppState>()(
           return {
             projects: {
               ...st.projects,
-              [id]: { ...p, pattern: { ...p.pattern, cells: v.cells.slice(), width: v.width, height: v.height }, updatedAt: now() },
+              [id]: {
+                ...p,
+                // 旧版本没有串链快照时保留当前串链
+                pattern: { ...p.pattern, cells: v.cells.slice(), width: v.width, height: v.height, strand: v.strand ?? p.pattern.strand },
+                updatedAt: now(),
+              },
             },
           };
         }),

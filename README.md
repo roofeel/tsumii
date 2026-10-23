@@ -45,6 +45,8 @@ CATALOG_SOURCE=sample          # 导入已核实色卡后改为 db
 
 对应的 IAM 身份需要 `bedrock:InvokeModel` 权限，并在 Bedrock 控制台开通 Claude Haiku 5.5 的模型访问。调用失败时，worker 日志中 `bedrock request failed` 一行包含 AWS 返回的错误码和原因。不想调用模型时可设置 `AI_PROVIDER=mock`。
 
+**邀请码**：AI 方案生成与二次设计需要邀请码。在 Coolify 中设置 `INVITE_CODES`（逗号分隔，可配置多个），用户第一次使用 AI 功能时会弹窗输入，验证通过后保存在浏览器中；每次调用 AI 时 web 服务端都会再次校验。删除某个邀请码后，使用它的用户下次调用会重新弹窗。**`INVITE_CODES` 留空时不做限制，生产环境务必设置。** 首页「热门串珠模板」是预制图纸，不调用 AI，不需要邀请码。
+
 ## 当前状态
 
 - 前后端的引擎算法一致：ΔE2000、材料公式和 motif 栅格化都有共用的测试数据对照。

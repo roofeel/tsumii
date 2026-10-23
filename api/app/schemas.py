@@ -107,6 +107,16 @@ class ProjectMeta(CamelModel):
 
 
 # ---------- 项目 / 图纸 ----------
+class StrandIO(CamelModel):
+    """项链主链：一个循环单元的色序 + 串链长度（cm）"""
+
+    sequence: list[str] = Field(min_length=1, max_length=200)
+    length_cm: int = Field(ge=10, le=120)
+
+    def to_db(self) -> dict:
+        return self.model_dump(by_alias=True)
+
+
 class ProjectCreate(CamelModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = ""
@@ -115,6 +125,7 @@ class ProjectCreate(CamelModel):
     width: int = Field(ge=1, le=MAX_SIDE)
     height: int = Field(ge=1, le=MAX_SIDE)
     cells: list[str]
+    strand: StrandIO | None = None
 
     @model_validator(mode="after")
     def _dims(self):
@@ -142,6 +153,7 @@ class PatternOut(CamelModel):
     width: int
     height: int
     cells: list[str]
+    strand: StrandIO | None = None
     version: int
     revision: int
     validation_errors: list[str] = []
@@ -177,6 +189,8 @@ class PatternPut(CamelModel):
     width: int = Field(ge=1, le=MAX_SIDE)
     height: int = Field(ge=1, le=MAX_SIDE)
     cells: list[str]
+    # 不传时保留原串链；传 null 删除串链
+    strand: StrandIO | None = None
     # 乐观并发：与服务器 revision 不一致时返回 409
     base_revision: int | None = None
 
@@ -208,6 +222,7 @@ class VersionOut(CamelModel):
     version: int
     width: int
     height: int
+    strand: StrandIO | None = None
     note: str
     created_at: datetime
 
