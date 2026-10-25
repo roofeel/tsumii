@@ -25,7 +25,7 @@ function CreateInner() {
   const { t, lang } = useT();
   const { session, setSession, createProject } = useApp();
   const catalog = useMemo(() => catalogById(ACTIVE_CATALOG), []);
-  const { withInvite, dialog: inviteDialog } = useInviteGate();
+  const { requestInvite, withInvite, dialog: inviteDialog } = useInviteGate();
 
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [override, setOverride] = useState<Partial<ParsedBrief>>({});
@@ -68,8 +68,12 @@ function CreateInner() {
     if (!hydrated || autoRan.current) return;
     autoRan.current = true;
     if (session.prompt) setPrompt(session.prompt);
-    if (params.get('auto') === '1' && session.prompt && session.ideas.length === 0) void generate(session.prompt, {}, 4);
-  }, [hydrated, params, session.prompt, session.ideas.length, generate]);
+    if (params.get('auto') === '1' && session.prompt && session.ideas.length === 0) {
+      void (async () => {
+        if (await requestInvite()) await generate(session.prompt, {}, 4);
+      })();
+    }
+  }, [hydrated, params, session.prompt, session.ideas.length, generate, requestInvite]);
 
   const ideas = session.ideas;
   const picked = ideas.find((i) => i.id === session.pickedId) ?? null;

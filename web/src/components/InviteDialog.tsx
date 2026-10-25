@@ -83,7 +83,7 @@ function InviteDialog({ onSubmit, onCancel }: { onSubmit: (code: string) => void
  * 包装调用 AI 的请求：自动带上邀请码；服务端返回 invite_required 时弹窗输入，验证通过后重试。
  * 用户取消时 withInvite 返回 null。
  */
-export function useInviteGate(): { withInvite: (run: (headers: Record<string, string>) => Promise<Response>) => Promise<Response | null>; dialog: ReactNode } {
+export function useInviteGate(): { requestInvite: () => Promise<boolean>; withInvite: (run: (headers: Record<string, string>) => Promise<Response>) => Promise<Response | null>; dialog: ReactNode } {
   const setInviteCode = useApp((s) => s.setInviteCode);
   const [open, setOpen] = useState(false);
   const resolver = useRef<((code: string | null) => void) | null>(null);
@@ -99,6 +99,13 @@ export function useInviteGate(): { withInvite: (run: (headers: Record<string, st
     resolver.current = null;
   }, []);
   const cancel = useCallback(() => close(null), [close]);
+
+  const requestInvite = useCallback(async () => {
+    const code = await ask();
+    if (!code) return false;
+    setInviteCode(code);
+    return true;
+  }, [setInviteCode]);
 
   const withInvite = useCallback(
     async (run: (headers: Record<string, string>) => Promise<Response>) => {
@@ -119,5 +126,5 @@ export function useInviteGate(): { withInvite: (run: (headers: Record<string, st
     [setInviteCode],
   );
 
-  return { withInvite, dialog: open ? <InviteDialog onSubmit={(c) => close(c)} onCancel={cancel} /> : null };
+  return { requestInvite, withInvite, dialog: open ? <InviteDialog onSubmit={(c) => close(c)} onCancel={cancel} /> : null };
 }
